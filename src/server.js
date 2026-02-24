@@ -5,52 +5,80 @@ const API_KEY = process.env.GROQ_API_KEY;
 const ENDPOINT = 'https://api.groq.ai/v1/query';
 const port = process.env.PORT || 3000;
 
-const animalSearchQueries = {
-  'chat': { api: 'cat', query: null },
-  'chien': { api: 'dog', query: null },
-  'lion': { api: 'wikimedia', query: 'Panthera leo lion' },
-  'elephant': { api: 'wikimedia', query: 'African elephant Loxodonta africana' },
-  'tigre': { api: 'wikimedia', query: 'Tiger Panthera tigris' },
-  'ours': { api: 'wikimedia', query: 'Brown bear Ursus arctos' },
-  'girafe': { api: 'wikimedia', query: 'Giraffe camelopardalis' },
-  'zebre': { api: 'wikimedia', query: 'Zebra Equus quagga' },
-  'hippopotame': { api: 'wikimedia', query: 'Hippopotamus amphibius' },
-  'crocodile': { api: 'wikimedia', query: 'Crocodile Nile' },
-  'singe': { api: 'wikimedia', query: 'Primate chimpanzee monkey' },
-  'leopard': { api: 'wikimedia', query: 'Leopard Panthera pardus' },
-  'panthere': { api: 'wikimedia', query: 'Black panther leopard' },
-  'rhinoceros': { api: 'wikimedia', query: 'Rhinoceros African' },
-  'antilope': { api: 'wikimedia', query: 'Antelope wildebeest gnu' },
-  'buffle': { api: 'wikimedia', query: 'African buffalo' },
-  'hyene': { api: 'wikimedia', query: 'Hyena crocuta' },
-  'autruche': { api: 'wikimedia', query: 'Ostrich African bird' },
-  'serpent': { api: 'wikimedia', query: 'Snake python cobra' },
-  'python': { api: 'wikimedia', query: 'Python snake' }
-};
+async function callGroqAPI(prompt) {
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 500
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('Groq API error:', error);
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      return data.choices[0].message.content;
+    }
+  } catch (err) {
+    console.error('Error calling Groq API:', err.message);
+  }
+  return null;
+}
+
+async function getAnimalInfoFromGroq(animalName) {
+  const prompt = `Fournissez les informations scientifiques sur ${animalName} au format JSON strict (sans markdown):
+  {"name": "nom français", "species": "nom scientifique", "size": "taille", "weight": "poids", "description": "courte description 1-2 lignes"}
+  Répondez UNIQUEMENT avec le JSON, rien d'autre.`;
+
+  const response = await callGroqAPI(prompt);
+  if (!response) return null;
+
+  try {
+    // Clean the response to extract JSON
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+  } catch (err) {
+    console.error('Error parsing Groq response:', err);
+  }
+}
 
 async function getAnimalImage(animalType) {
   try {
-    const animalKey = animalType.toLowerCase().trim();
-    const config = animalSearchQueries[animalKey];
-    
-    if (!config) {
-      // Unknown animal - try generic search
-      return await fetchWikimediaImage(animalType);
-    }
-    
-    if (config.api === 'cat') {
+    // Try thecat API for cats
+    if (animalType.toLowerCase().includes('chat')) {
       const res = await fetch('https://api.thecatapi.com/v1/images/search');
       const data = await res.json();
       if (data && data[0] && data[0].url) return data[0].url;
-    } else if (config.api === 'dog') {
+    }
+    // Try dog API for dogs
+    else if (animalType.toLowerCase().includes('chien')) {
       const res = await fetch('https://dog.ceo/api/breeds/image/random');
       const data = await res.json();
       if (data && data.message) return data.message;
     }
     
-    if (config.query) {
-      return await fetchWikimediaImage(config.query);
-    }
+    // For other animals, try Wikimedia Commons API
+    const imageUrl = await fetchWikimediaImage(animalType);
+    if (imageUrl) return imageUrl;
   } catch (err) {
     console.warn('Could not fetch animal image:', err.message);
   }
@@ -58,13 +86,14 @@ async function getAnimalImage(animalType) {
   return generateAnimalSVG(animalType);
 }
 
-async function fetchWikimediaImage(searchQuery) {
+async function fetchWikimediaImage(animalName) {
   try {
+    const searchQuery = animalName.toLowerCase().trim();
     const wikiRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(searchQuery)}&srnamespace=6&srlimit=10&srsort=relevance`);
     const wikiData = await wikiRes.json();
     
     if (wikiData.query && wikiData.query.search && wikiData.query.search.length > 0) {
-      // Try to find a good quality image (prefer jpg/png, avoid thumbnails)
+      // Try to find a good quality image
       for (const result of wikiData.query.search.slice(0, 5)) {
         const title = result.title;
         if (title.includes('.jpg') || title.includes('.png') || title.includes('.jpeg')) {
@@ -75,7 +104,6 @@ async function fetchWikimediaImage(searchQuery) {
           for (const page of Object.values(pages)) {
             if (page.imageinfo && page.imageinfo[0] && page.imageinfo[0].url) {
               const url = page.imageinfo[0].url;
-              // Prefer larger images (width > 300px recommended)
               if (url && (url.includes('wikipedia') || url.includes('wikimedia'))) {
                 return url;
               }
@@ -202,9 +230,16 @@ app.post('/animal', async (req, res) => {
     const { name } = req.body;
     if (!name) return res.status(400).send('Missing name');
 
-    // If mock mode is enabled, return a fake animal immediately
-    if (process.env.MOCK_RESPONSE === '1') {
-      const animals = {
+    // Try to get info from Groq API first
+    let animalInfo = null;
+    if (API_KEY && API_KEY.trim()) {
+      animalInfo = await getAnimalInfoFromGroq(name);
+      console.log(`Groq response for ${name}:`, animalInfo);
+    }
+
+    // If Groq fails or API_KEY not set, use mock data
+    if (!animalInfo) {
+      const mockAnimals = {
         'chat': { 
           name: 'Chat', 
           species: 'Felis catus', 
@@ -246,39 +281,122 @@ app.post('/animal', async (req, res) => {
           size: '1.5-2.8 m', 
           weight: '200-600 kg', 
           description: 'Mammifère puissant, omnivore, symbole de force et de nature sauvage.'
+        },
+        'girafe': { 
+          name: 'Girafe', 
+          species: 'Giraffa camelopardalis', 
+          size: '4.5-5.5 m', 
+          weight: '700-900 kg', 
+          description: 'Animal herbivore au long cou, le plus haut quadrupède terrestre.'
+        },
+        'zebre': { 
+          name: 'Zèbre', 
+          species: 'Equus quagga', 
+          size: '2.2-2.5 m', 
+          weight: '350-450 kg', 
+          description: 'Équidé noir et blanc, animal herbivore vivant en troupeaux.'
+        },
+        'hippopotame': { 
+          name: 'Hippopotame', 
+          species: 'Hippopotamus amphibius', 
+          size: '3.5-4.2 m', 
+          weight: '1500-1800 kg', 
+          description: 'Mammifère semi-aquatique africain, herbivore agressif.'
+        },
+        'crocodile': { 
+          name: 'Crocodile', 
+          species: 'Crocodylus niloticus', 
+          size: '2-5 m', 
+          weight: '200-1000 kg', 
+          description: 'Reptile prédateur vivant dans l\'eau, chasseur redoutable.'
+        },
+        'singe': { 
+          name: 'Singe', 
+          species: 'Primates', 
+          size: '0.5-1.8 m', 
+          weight: '2-100 kg', 
+          description: 'Primate intelligent, agile et vivant en groupes sociaux.'
+        },
+        'leopard': { 
+          name: 'Léopard', 
+          species: 'Panthera pardus', 
+          size: '0.9-1.3 m', 
+          weight: '30-90 kg', 
+          description: 'Félin tachet africain, chasseur solitaire et nocturne.'
+        },
+        'panthere': { 
+          name: 'Panthère', 
+          species: 'Panthera pardus', 
+          size: '0.9-1.3 m', 
+          weight: '30-90 kg', 
+          description: 'Léopard noir ou variante sombre du félin tacheté.'
+        },
+        'rhinoceros': { 
+          name: 'Rhinocéros', 
+          species: 'Rhinocerotidae', 
+          size: '2.5-3.7 m', 
+          weight: '1000-2300 kg', 
+          description: 'Grand herbivore à peau épaisse, doté d\'une ou deux cornes.'
+        },
+        'antilope': { 
+          name: 'Antilope', 
+          species: 'Bovidae', 
+          size: '0.6-1.5 m', 
+          weight: '20-350 kg', 
+          description: 'Artiodactyle herbivore africain, animal rapide et gracieux.'
+        },
+        'buffle': { 
+          name: 'Buffle', 
+          species: 'Syncerus caffer', 
+          size: '2.1-2.7 m', 
+          weight: '500-900 kg', 
+          description: 'Bovidé africain puissant, herbivore vivant en troupeaux.'
+        },
+        'hyene': { 
+          name: 'Hyène', 
+          species: 'Crocuta crocuta', 
+          size: '1.1-1.4 m', 
+          weight: '40-90 kg', 
+          description: 'Carnivore africain avec une mâchoire puissante.'
+        },
+        'autruche': { 
+          name: 'Autruche', 
+          species: 'Struthio camelus', 
+          size: '2-2.8 m', 
+          weight: '100-160 kg', 
+          description: 'Plus grand oiseau terrestre, incapable de voler mais très rapide.'
+        },
+        'serpent': { 
+          name: 'Serpent', 
+          species: 'Serpentes', 
+          size: '0.2-10 m', 
+          weight: '0.1-250 kg', 
+          description: 'Reptile sans membres, carnivore vivant dans divers habitats.'
+        },
+        'python': { 
+          name: 'Python', 
+          species: 'Pythonidae', 
+          size: '1-6 m', 
+          weight: '1-100 kg', 
+          description: 'Serpent constrictor non venimeux, prédateur de petits animaux.'
         }
       };
       const searchName = name.toLowerCase().trim();
-      const animal = animals[searchName] || { 
+      animalInfo = mockAnimals[searchName] || { 
         name: name.charAt(0).toUpperCase() + name.slice(1), 
         species: 'Espèce inconnue', 
         size: 'Inconnue', 
         weight: 'Inconnue', 
         description: 'Cet animal n\'est pas dans notre base de données.'
       };
-      
-      // Get image from API or fallback to SVG
-      const imageUrl = await getAnimalImage(animal.name);
-      animal.image = { url: imageUrl };
-      animal.mock = true;
-      return res.json(animal);
     }
 
-    // Real API call
-    const safeName = String(name).replace(/\"/g, '\\"').replace(/\n/g, ' ');
-    const groq = `*[_type == "animal" && name match "${safeName}" ]{name, species, size, weight, description, "image": image.asset->url}[0]`;
+    // Get image from API or fallback to SVG
+    const imageUrl = await getAnimalImage(animalInfo.name);
+    animalInfo.image = { url: imageUrl };
+    animalInfo.source = API_KEY && API_KEY.trim() ? 'Groq API' : 'Mock Database';
 
-    const result = await runQuery(groq);
-    if (!result) return res.status(404).send('No result');
-
-    if (result.result && Array.isArray(result.result)) {
-      return res.json(result.result[0] || {});
-    }
-    if (result.results && Array.isArray(result.results)) {
-      return res.json(result.results[0] || {});
-    }
-
-    return res.json(result);
+    res.json(animalInfo);
   } catch (err) {
     res.status(500).send(`Erreur: ${err.message}`);
   }
