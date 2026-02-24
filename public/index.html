@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Requête GROQ (statique)</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
+    textarea { width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>Interroger l'API GROQ</h1>
+  <p>Cette page est entièrement statique ; toutes les requêtes sont envoyées par le navigateur.</p>
+  <form id="form">
+    <textarea id="query" rows="6" placeholder="Entrez votre requête GROQ"></textarea><br>
+    <button type="submit">Envoyer</button>
+  </form>
+  <h2>Résultat</h2>
+  <pre id="result"></pre>
+
+  <script>
+    const API_KEY = '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';
+    const ENDPOINT = 'https://api.groq.ai/v1/query';
+
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const query = document.getElementById('query').value;
+      try {
+        const res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${API_KEY}`
+          },
+          body: JSON.stringify({ query })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        document.getElementById('result').textContent = 'Erreur: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>
