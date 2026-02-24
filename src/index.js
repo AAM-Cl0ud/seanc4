@@ -1,7 +1,7 @@
 import readline from 'readline';
 
 // key must be provided via environment variable
-const API_KEY = process.env.GROQ_API_KEY;
+const API_KEY = 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;
 const ENDPOINT = 'https://api.groq.ai/v1/query';
 
 if (!API_KEY) {

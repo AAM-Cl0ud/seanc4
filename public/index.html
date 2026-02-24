@@ -3,44 +3,79 @@
 <head>
   <meta charset="UTF-8">
   <title>Requête GROQ (statique)</title>
-  <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
-    textarea { width: 100%; }
-  </style>
-</head>
-<body>
-  <h1>Interroger l'API GROQ</h1>
-  <p>Cette page est entièrement statique ; toutes les requêtes sont envoyées par le navigateur.</p>
-  <form id="form">
-    <textarea id="query" rows="6" placeholder="Entrez votre requête GROQ"></textarea><br>
-    <button type="submit">Envoyer</button>
+  <h1>Recherche d'animal</h1>
+  <p>Entrez le nom d'un animal pour obtenir une photo et ses spécificités (via Groq API).</p>
+
+  <form id="animal-form">
+    <input id="name" type="text" placeholder="Ex: chat, chien, lion" style="width:70%;padding:8px;font-size:16px" />
+    <button type="submit" style="padding:8px 12px;font-size:16px">Rechercher</button>
   </form>
-  <h2>Résultat</h2>
-  <pre id="result"></pre>
+
+  <div id="card" style="margin-top:20px;display:none;border-radius:8px;padding:16px;background:#fff;border:1px solid #eee;box-shadow:0 2px 8px rgba(0,0,0,0.05);max-width:700px">
+    <div id="photo" style="float:left;width:40%;padding-right:12px"></div>
+    <div id="info" style="overflow:hidden"></div>
+    <div style="clear:both"></div>
+  </div>
+
+  <div id="error" style="color:#b00;margin-top:12px"></div>
 
   <script>
-    const API_KEY = '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';
-    const ENDPOINT = 'https://api.groq.ai/v1/query';
+    const form = document.getElementById('animal-form');
+    const nameInput = document.getElementById('name');
+    const card = document.getElementById('card');
+    const photo = document.getElementById('photo');
+    const info = document.getElementById('info');
+    const errorEl = document.getElementById('error');
 
-    document.getElementById('form').addEventListener('submit', async (e) => {
+    async function fetchAnimal(name) {
+      const res = await fetch('/animal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      return res.json();
+    }
+
+    function showAnimal(data) {
+      errorEl.textContent = '';
+      card.style.display = 'block';
+      if (data.image && data.image.url) {
+        photo.innerHTML = `<img src="${data.image.url}" alt="${data.name}" style="width:100%;border-radius:6px;object-fit:cover" />`;
+      } else {
+        photo.innerHTML = `<div style="width:100%;height:180px;background:#f0f0f0;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#888">Pas d'image</div>`;
+      }
+      const fields = [];
+      if (data.name) fields.push(`<h2 style="margin:0 0 8px">${data.name}</h2>`);
+      if (data.species) fields.push(`<b>Espèce:</b> ${data.species}<br>`);
+      if (data.size) fields.push(`<b>Taille:</b> ${data.size}<br>`);
+      if (data.weight) fields.push(`<b>Poids:</b> ${data.weight}<br>`);
+      if (data.description) fields.push(`<p style="margin-top:8px">${data.description}</p>`);
+      if (data.mock) fields.push(`<small style="color:#666">(Réponse factice)</small>`);
+      info.innerHTML = fields.join('');
+    }
+
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const query = document.getElementById('query').value;
+      const name = nameInput.value.trim();
+      if (!name) return;
+      card.style.display = 'none';
+      errorEl.textContent = 'Chargement...';
       try {
-        const res = await fetch(ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${API_KEY}`
-          },
-          body: JSON.stringify({ query })
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+        const result = await fetchAnimal(name);
+        if (!result) throw new Error('Aucun résultat');
+        // If server returns wrapper (e.g., results), normalize
+        let data = result;
+        if (result.results && result.results.length) data = result.results[0];
+        showAnimal(data);
       } catch (err) {
-        document.getElementById('result').textContent = 'Erreur: ' + err.message;
+        errorEl.textContent = 'Erreur: ' + err.message;
       }
     });
   </script>
+  </style>
 </body>
 </html>
